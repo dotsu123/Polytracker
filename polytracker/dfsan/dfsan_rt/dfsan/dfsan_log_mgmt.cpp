@@ -58,15 +58,26 @@ taintLogManager::logCompare(dfsan_label some_label) {
 	(function_to_bytes)[func_stack[func_stack.size()-1]].insert(curr_node);	      
 	taint_log_lock.unlock(); 
 }
-
+bool LOG_LABELS = false;
+bool log_verbose = false;
 void 
-taintLogManager::logOperation(dfsan_label some_label) {
+taintLogManager::logOperation(dfsan_label some_label, int line, int col) {
 	if (some_label == 0) {return;}
 	taint_log_lock.lock();
 	taint_node_t * new_node = map_manager->getTaintNode(some_label);
-	printf("taint_source %d label %d\n", new_node->taint_source, some_label);
+	auto src = new_node->taint_source;
+	if(line == 0 && col == 0){
+		if(log_verbose)
+		{
+			printf("extra taint label %d level %d\n", some_label, new_node->level++);
+		}
+	}
+	else
+		printf("taint_source line: %d col: %d label %d level %d\n", line, col, some_label, new_node->level++);
 
  	fflush(stdout);
+	if(LOG_LABELS)
+	{
 		//We convert to Roaring to save space during this traversal/caching 
 		Roaring all_labels; 
 
@@ -80,7 +91,7 @@ taintLogManager::logOperation(dfsan_label some_label) {
 			json byte_set(map_it->second); 
 			byte_set.dump();
 		}
-
+	}
 	std::thread::id this_id = std::this_thread::get_id();
 	std::vector<std::string> func_stack = thread_stack_map[this_id];
 	(function_to_bytes)[func_stack[func_stack.size()-1]].insert(new_node);

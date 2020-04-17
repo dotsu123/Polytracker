@@ -66,6 +66,8 @@ static uptr forest_base_addr = MappingArchImpl<MAPPING_TAINT_FOREST_ADDR>();
 //These are some configuration options set via some enviornment variables to change resource usage 
 //And tracking behavior dump_forest dumps shadow memory content and function_to_bytes map, see above 
 static bool dump_forest_and_sets = false;
+// Output every possible propagation if log_verbose is true, 
+static bool log_verbose = false;
 
 //This is a decay value, its a practical choice made due to the inherent problems when using taint analysis 
 //Specifically, when analyzing functions that manipulate a lot of data, like decompression functions, youll get way too much data 
@@ -145,9 +147,10 @@ void __dfsan_log_taint_cmp(dfsan_label some_label) {
 extern "C" SANITIZER_INTERFACE_ATTRIBUTE
 //void __dfsan_log_taint(dfsan_label some_label) {
 void __dfsan_log_taint(int line, int col, dfsan_label some_label) {
-	taint_log_manager->logOperation(some_label); 
+	taint_log_manager->logOperation(some_label, line, col); 
 	//puts(inst);
-	printf("Tainted variable: line: %d, col: %d\n", line, col);
+	if(log_verbose)
+		printf("Tainted variable: line: %d, col: %d\n", line, col);
 	//inst->getOperand(0)->print(errs());
 }
 
@@ -424,6 +427,9 @@ void dfsan_late_init() {
 	}
 	if (dfsan_getenv("POLYDUMP") != NULL) {
 		dump_forest_and_sets = true;
+	}
+	if (dfsan_getenv("LOG_VERBOSE") != NULL) {
+		log_verbose = true;
 	}
 
 	const char * env_ttl = dfsan_getenv("POLYTTL");

@@ -1275,8 +1275,16 @@ Value *DFSanFunction::combineShadows(Value *V1, Value *V2, Instruction *Pos) {
   return CCS.Shadow;
 }
 
+/*
+void DFSanVisitor::handleSpecialFunctions(Instruction * InsertPoint, Value * Shadow)
+{
+  logTaintedOps(InsertPoint, Shadow);
+}*/
+
+
 bool PRINT_NAME = false;
 bool LOG_INFO = false;
+
 void DFSanVisitor::logTaintedOps(Instruction * InsertPoint, Value * Shadow) {
   int line = 0;
   int col = 0;
@@ -1698,7 +1706,10 @@ void DFSanVisitor::visitReturnInst(ReturnInst &RI) {
   IRBuilder<> IRB(&RI);
   CallInst * ExitCall = IRB.CreateCall(DFSF.DFS.DFSanExitFn, {});
 }
-
+// mmap is ignored here
+int custom_fun_len = 9;
+char *func_list[] = {"read", "pread", "pread64", "fread", "fread_unlocked", "fgets", "gets", "getdelim", "__getdelim"};
+int param_pos[] = {1, 1, 1, 0, 0, 0, 0, 0, 0};
 void DFSanVisitor::visitCallSite(CallSite CS) {
   Function *F = CS.getCalledFunction();
   if ((F && F->isIntrinsic()) || isa<InlineAsm>(CS.getCalledValue())) {
@@ -1775,6 +1786,17 @@ void DFSanVisitor::visitCallSite(CallSite CS) {
           }
         }
 
+        //custom_fun_len = 9;
+        //char *func_list[] = {"read", "pread", "pread64", "fread", "fread_unlocked", "fgets", "gets", "getdelim", "__getdelim"};
+        //int param_pos[] ;
+        std::string fName = F->getName();
+        for(int j=0; j<custom_fun_len; j++)
+        {
+          if(!strcmp(fName.c_str(), func_list[j]))
+            printf("%s\n", fName.c_str());
+
+        }
+
         i = CS.arg_begin();
         const unsigned ShadowArgStart = Args.size();
         for (unsigned n = FT->getNumParams(); n != 0; ++i, --n)
@@ -1825,6 +1847,7 @@ void DFSanVisitor::visitCallSite(CallSite CS) {
         if (!FT->getReturnType()->isVoidTy()) {
           LoadInst *LabelLoad = IRB.CreateLoad(DFSF.LabelReturnAlloca);
           DFSF.setShadow(CustomCI, LabelLoad);
+          // can only log functions that the return value is tainted
           logTaintedOps(CS.getInstruction(), LabelLoad);
           //logTaintedOps(CustomCI, LabelLoad);
         }

@@ -41,8 +41,6 @@ typedef struct taint_node {
  taint_source_id taint_source;
  //Decay field
  decay_val decay;
- //taint level
- int level;
 } taint_node_t;
 
 
