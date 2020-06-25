@@ -47,51 +47,96 @@ taintLogManager::taintLogManager(taintMappingManager * map_mgr, taintInfoManager
 
 taintLogManager::~taintLogManager() {}
 
+bool LOG_ALL_LABELS = true;
+bool log_verbose = false;
 void 
-taintLogManager::logCompare(dfsan_label some_label) {
+taintLogManager::logCompare(dfsan_label some_label, int line, int col) {
 	if (some_label == 0) {return;}
 	taint_log_lock.lock();
 	taint_node_t * curr_node = map_manager->getTaintNode(some_label); 
+
+
+
+	if(line == 0 && col == 0){
+		if(log_verbose)
+		{
+			printf("extra taint cmp label %d level %d\n", some_label, curr_node->level);
+			
+		}
+	}
+	else
+	{
+		printf("taint_source cmp line: %d col: %d label %d level %d\n", line, col, some_label, curr_node->level);
+		if(LOG_ALL_LABELS) // && new_node->level > 1)
+		{
+
+			Roaring ret = iterativeDFS(curr_node);
+
+			
+			for (auto it = ret.begin(); it != ret.end(); it++) {
+				printf("%d\n", *it);
+			}
+
+
+			//Split up roaring based on origin bytes, and then into sets which we can make jsons 
+			/*
+			std::unordered_map<std::string, std::set<dfsan_label>> source_set_map  = utilityPartitionSet(ret);
+			for (auto map_it = source_set_map.begin(); map_it != source_set_map.end(); map_it++) {
+				json byte_set(map_it->second); 
+				byte_set.dump();
+			}*/
+		}
+	}
+
+ 	fflush(stdout);
+
+
+
 	std::thread::id this_id = std::this_thread::get_id(); 
 	std::vector<std::string> func_stack = thread_stack_map[this_id];
 	(function_to_cmp_bytes)[func_stack[func_stack.size()-1]].insert(curr_node);
 	(function_to_bytes)[func_stack[func_stack.size()-1]].insert(curr_node);	      
 	taint_log_lock.unlock(); 
 }
-bool LOG_LABELS = false;
-bool log_verbose = false;
 void 
 taintLogManager::logOperation(dfsan_label some_label, int line, int col) {
 	if (some_label == 0) {return;}
 	taint_log_lock.lock();
 	taint_node_t * new_node = map_manager->getTaintNode(some_label);
-	auto src = new_node->taint_source;
+	//auto src = new_node->taint_source;
 	if(line == 0 && col == 0){
 		if(log_verbose)
 		{
 			printf("extra taint label %d level %d\n", some_label, new_node->level++);
+			
 		}
 	}
 	else
-		printf("taint_source line: %d col: %d label %d level %d\n", line, col, some_label, new_node->level++);
-
- 	fflush(stdout);
-	if(LOG_LABELS)
 	{
-		//We convert to Roaring to save space during this traversal/caching 
-		Roaring all_labels; 
+		printf("taint_source line: %d col: %d label %d level %d\n", line, col, some_label, new_node->level++);
+		if(LOG_ALL_LABELS) // && new_node->level > 1)
+		{
 
-		Roaring ret = iterativeDFS(new_node);
-		//You can bitwise or on the roaring sets 
-		all_labels = all_labels | ret; 
+			Roaring ret = iterativeDFS(new_node);
 
-		//Split up roaring based on origin bytes, and then into sets which we can make jsons 
-		std::unordered_map<std::string, std::set<dfsan_label>> source_set_map  = utilityPartitionSet(all_labels);
-		for (auto map_it = source_set_map.begin(); map_it != source_set_map.end(); map_it++) {
-			json byte_set(map_it->second); 
-			byte_set.dump();
+			
+			for (auto it = ret.begin(); it != ret.end(); it++) {
+				printf("%d\n", *it);
+			}
+
+
+			//Split up roaring based on origin bytes, and then into sets which we can make jsons 
+			/*
+			std::unordered_map<std::string, std::set<dfsan_label>> source_set_map  = utilityPartitionSet(ret);
+			for (auto map_it = source_set_map.begin(); map_it != source_set_map.end(); map_it++) {
+				json byte_set(map_it->second); 
+				byte_set.dump();
+			}*/
 		}
 	}
+
+ 	fflush(stdout);
+
 	std::thread::id this_id = std::this_thread::get_id();
 	std::vector<std::string> func_stack = thread_stack_map[this_id];
 	(function_to_bytes)[func_stack[func_stack.size()-1]].insert(new_node);
@@ -175,18 +220,29 @@ taintLogManager::utilityPartitionSet(Roaring label_set) {
 
 Roaring
 taintLogManager::iterativeDFS(taint_node_t * node) {
+	//printf("st\n");
 	//Stack instead of using call stack 
 	std::stack<taint_node_t *> * node_stack = new std::stack<taint_node_t*>(); 
+	//printf("st1\n");
 	//Collection of parent labels for the node we want to return 
 	Roaring parent_labels;
-	std::vector<bool> * visited_node = new std::vector<bool>(max_label + 1, false); 
+	int node_num = map_manager->getTaintLabel(node);
+	//printf("%d %d\n",max_label, node_num);
+	int node_size = max_label + 1;
+	if(node_num + 1 > node_size)
+		node_size = node_num + 1;
+	std::vector<bool> * visited_node = new std::vector<bool>(node_size, false); 
+	//printf("st2\n");
 	node_stack->push(node); 
+	//printf("st3\n");
 	//Go until we have no more paths to explore 
 	while (!node_stack->empty()) {
 		taint_node_t * curr_node = node_stack->top();
 		node_stack->pop(); 
 
+		//printf("st4\n");
 		dfsan_label curr_label = map_manager->getTaintLabel(curr_node); 
+		//printf("%d,",curr_label);
 		//If visited just continue
 		if ((*visited_node)[curr_label])  {
 			continue; 
@@ -202,12 +258,14 @@ taintLogManager::iterativeDFS(taint_node_t * node) {
 		//Else if we havent checked out the parents, lets do it
 		if (curr_node->p1 != NULL) {
 			dfsan_label p1_label = map_manager->getTaintLabel(curr_node->p1); 
+		//printf("\nl: %d\n",p1_label);
 		 	if ((*visited_node)[p1_label] == false) {
 				node_stack->push(curr_node->p1); 
 			}	
 		}
 		if (curr_node->p2 != NULL) {
 			dfsan_label p2_label = map_manager->getTaintLabel(curr_node->p2); 
+		//printf("\nr: %d\n",p2_label);
 			if ((*visited_node)[p2_label] == false) {
 				node_stack->push(curr_node->p2);
 			}

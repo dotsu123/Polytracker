@@ -53,7 +53,7 @@ class taintLogManager {
 		taintLogManager(taintMappingManager * map_mgr, taintInfoManager * info_mgr,
 				std::string outfile, bool should_dump); 
 		~taintLogManager(); 
-		void logCompare(dfsan_label some_label); 
+		void logCompare(dfsan_label some_label, int line, int col); 
 		void logOperation(dfsan_label some_label, int line, int col);
 		//This returns the index so it can be used by reset_frame later
 		int logFunctionEntry(char* fname); 

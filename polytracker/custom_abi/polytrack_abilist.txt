@@ -1,3 +1,23 @@
+fun:snd_pcm_open=uninstrumented
+fun:snd_pcm_open=discard
+fun:snd_strerror=uninstrumented
+fun:snd_strerror=discard
+fun:snd_pcm_set_params=uninstrumented
+fun:snd_pcm_set_params=discard
+fun:snd_strerror=uninstrumented
+fun:snd_strerror=discard
+fun:snd_pcm_writei=uninstrumented
+fun:snd_pcm_writei=discard
+fun:snd_pcm_recover=uninstrumented
+fun:snd_pcm_recover=discard
+fun:snd_strerror=uninstrumented
+fun:snd_strerror=discard
+fun:snd_pcm_drain=uninstrumented
+fun:snd_pcm_drain=discard
+fun:snd_pcm_close=uninstrumented
+fun:snd_pcm_close=discard
+
+
 fun:main=uninstrumented
 fun:main=discard
 
@@ -40,6 +60,7 @@ fun:getdelim=custom
 fun:__getdelim=custom
 
 #mmap stuff
+fun:mmap=uninstrumented
 fun:mmap=custom
 fun:munmap=custom
 

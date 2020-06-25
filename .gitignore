@@ -6,3 +6,10 @@ __pycache__
 .mypy_cache
 .DS_Store
 /the_klondike
+/libtiff
+/audiofile
+/AFL
+/lame
+*.old
+*.625
+/tcpdump

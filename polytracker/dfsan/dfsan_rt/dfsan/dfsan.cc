@@ -140,8 +140,10 @@ int __dfsan_func_entry(char * fname) {
 }
 
 extern "C" SANITIZER_INTERFACE_ATTRIBUTE
-void __dfsan_log_taint_cmp(dfsan_label some_label) {
-	taint_log_manager->logCompare(some_label); 
+void __dfsan_log_taint_cmp(int line, int col, dfsan_label some_label) {
+	taint_log_manager->logCompare(some_label, line, col); 
+	if(log_verbose)
+		printf("Tainted variable cmp: line: %d, col: %d\n", line, col);
 }
 
 extern "C" SANITIZER_INTERFACE_ATTRIBUTE

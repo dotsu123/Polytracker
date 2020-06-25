@@ -607,7 +607,7 @@ bool DataFlowSanitizer::doInitialization(Module &M) {
 	//Type * DFSanLogTaintArgs[1] = {ShadowTy};
  	//DFSanLogTaintFnTy = FunctionType::get(Type::getVoidTy(*Ctx), DFSanLogTaintArgs, false);
   
-	Type * DFSanLogCmpArgs[1] = {ShadowTy};
+	Type * DFSanLogCmpArgs[3] = {Type::getInt32Ty(*Ctx), Type::getInt32Ty(*Ctx), ShadowTy};
  	DFSanLogCmpFnTy = FunctionType::get(Type::getVoidTy(*Ctx), DFSanLogCmpArgs, false);
 	
 	Type * DFSanEntryArgs[1] = {Type::getInt8PtrTy(*Ctx)};
@@ -1293,7 +1293,7 @@ void DFSanVisitor::logTaintedOps(Instruction * InsertPoint, Value * Shadow) {
     line = location.getLine();
     col = location.getCol();
   } else {
-      printf("no debug info:\n");
+      //printf("no debug info:\n");
   }
   if(LOG_INFO)
   {
@@ -1576,10 +1576,43 @@ void DFSanVisitor::visitCastInst(CastInst &CI) { visitOperandShadowInst(CI); }
 
 void DFSanVisitor::visitCmpInst(CmpInst &CI) {
 
+
   Value *CombinedShadow = DFSF.combineOperandShadows(&CI);
   DFSF.setShadow(&CI, CombinedShadow);
+
+
   IRBuilder<> IRB(&CI);
-  CallInst *Call = IRB.CreateCall(DFSF.DFS.DFSanLogCmpFn, CombinedShadow);
+  int line = 0;
+  int col = 0;
+  const DebugLoc &location = CI.getDebugLoc();
+  if (location) {
+    line = location.getLine();
+    col = location.getCol();
+  } else {
+      //printf("no debug info:\n");
+  }
+  if(LOG_INFO)
+  {
+  printf("\n%d %d: ", line, col);
+  printf("label = %" PRIu16 "\n", CombinedShadow);
+  CI.print(errs());
+  }
+  if(CombinedShadow == DFSF.DFS.ZeroShadow)
+    return;
+  Value* args[3] = {};
+  if(PRINT_NAME) 
+  {
+    args[0] = IRB.CreateGlobalStringPtr(StringRef(CI.getOpcodeName()));
+    args[1] = IRB.CreateGlobalStringPtr(StringRef(CI.getOpcodeName()));
+  }
+  else
+  {
+    args[0] = IRB.getInt32(line);
+    args[1] = IRB.getInt32(col);
+  }
+  args[2] = CombinedShadow;
+  CallInst *Call = IRB.CreateCall(DFSF.DFS.DFSanLogCmpFn, args);
+
   Call->addAttribute(AttributeList::ReturnIndex, Attribute::ZExt);
   Call->addParamAttr(0, Attribute::ZExt);
 }
