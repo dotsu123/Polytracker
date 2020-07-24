@@ -47,9 +47,6 @@
 //
 //===----------------------------------------------------------------------===//
 #define DEBUG_INFO
-#include "llvm/IR/DebugInfo.h"
-#include "llvm/IR/DebugLoc.h"
-#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/DepthFirstIterator.h"
@@ -171,11 +168,6 @@ static cl::opt<bool> ClDebugNonzeroLabels(
         "load or return with a nonzero label"),
         cl::Hidden);
 
-static cl::opt<bool> LOG_INFO(
-    "polytrack-dfsan-debug-loginfo",
-    cl::desc("Log verbose"),
-        cl::Hidden, cl::init(false));
-        
 static StringRef GetGlobalTypeString(const GlobalValue &G) {
   // Types of GlobalVariables are always pointer types.
   Type *GType = G.getValueType();
@@ -347,13 +339,10 @@ class DataFlowSanitizer : public ModulePass {
   ConstantInt *ShadowPtrMul;
   Constant *ArgTLS;
   Constant *RetvalTLS;
-  Constant *VarArgTLS;
   void *(*GetArgTLSPtr)();
   void *(*GetRetvalTLSPtr)();
-  void *(*GetVarArgTLSPtr)();
   Constant *GetArgTLS;
   Constant *GetRetvalTLS;
-  Constant *GetVarArgTLS;
   Constant *ExternalShadowMask;
   FunctionType *DFSanUnionFnTy;
   FunctionType *DFSanUnionLoadFnTy;
@@ -395,8 +384,6 @@ class DataFlowSanitizer : public ModulePass {
   bool isInstrumented(const Function *F);
   bool isInstrumented(const GlobalAlias *GA);
   FunctionType *getArgsFunctionType(FunctionType *T);
-  char *getFileNameOfFunc(Function* func);
-  char *getFileNameOfInst(Instruction* func);
   FunctionType *getTrampolineFunctionType(FunctionType *T);
   TransformedFunction getCustomFunctionType(FunctionType *T);
   InstrumentedABI getInstrumentedABI();
@@ -426,7 +413,6 @@ struct DFSanFunction {
   bool IsNativeABI;
   Value *ArgTLSPtr = nullptr;
   Value *RetvalTLSPtr = nullptr;
-  Value *VarArgTLSPtr = nullptr;
   AllocaInst *LabelReturnAlloca = nullptr;
   DenseMap<Value *, Value *> ValShadowMap;
   DenseMap<AllocaInst *, AllocaInst *> AllocaShadowMap;
@@ -454,7 +440,6 @@ struct DFSanFunction {
   Value *getArgTLSPtr();
   Value *getArgTLS(unsigned Index, Instruction *Pos);
   Value *getRetvalTLS();
-  Value *getVarArgTLS();
   Value *getShadow(Value *V);
   void setShadow(Instruction *I, Value *Shadow);
   Value *combineShadows(Value *V1, Value *V2, Instruction *Pos);
@@ -511,7 +496,6 @@ llvm::createDataFlowSanitizerPass(const std::vector<std::string> &ABIListFiles,
     void *(*getRetValTLS)()) {
   return new DataFlowSanitizer(ABIListFiles, getArgTLS, getRetValTLS);
 }
-
 
 DataFlowSanitizer::DataFlowSanitizer(
     const std::vector<std::string> &ABIListFiles, void *(*getArgTLS)(),
@@ -616,17 +600,17 @@ bool DataFlowSanitizer::doInitialization(Module &M) {
       Type::getVoidTy(*Ctx), Type::getInt8PtrTy(*Ctx), /*isVarArg=*/false);
   
   //Type * DFSanLogTaintArgs[1] = {InstPtrTy};
-  Type * DFSanLogTaintArgs[4] = {Type::getInt32Ty(*Ctx), Type::getInt32Ty(*Ctx), ShadowTy, Type::getInt8PtrTy(*Ctx)};
+  Type * DFSanLogTaintArgs[3] = {Type::getInt32Ty(*Ctx), Type::getInt32Ty(*Ctx), ShadowTy};
   //Type * DFSanLogTaintArgs[1] = {IntegerType::getInt32Ty(getGlobalContext())};
  	DFSanLogTaintFnTy = FunctionType::get(Type::getVoidTy(*Ctx), DFSanLogTaintArgs, false);
   
 	//Type * DFSanLogTaintArgs[1] = {ShadowTy};
  	//DFSanLogTaintFnTy = FunctionType::get(Type::getVoidTy(*Ctx), DFSanLogTaintArgs, false);
   
-	Type * DFSanLogCmpArgs[4] = {Type::getInt32Ty(*Ctx), Type::getInt32Ty(*Ctx), ShadowTy, Type::getInt8PtrTy(*Ctx)};
+	Type * DFSanLogCmpArgs[3] = {Type::getInt32Ty(*Ctx), Type::getInt32Ty(*Ctx), ShadowTy};
  	DFSanLogCmpFnTy = FunctionType::get(Type::getVoidTy(*Ctx), DFSanLogCmpArgs, false);
 	
-	Type * DFSanEntryArgs[2] = {Type::getInt8PtrTy(*Ctx), Type::getInt8PtrTy(*Ctx)};
+	Type * DFSanEntryArgs[1] = {Type::getInt8PtrTy(*Ctx)};
  	DFSanEntryFnTy = FunctionType::get(IntegerType::getInt64Ty(*Ctx), DFSanEntryArgs, false);
   
 	DFSanExitFnTy = FunctionType::get(Type::getVoidTy(*Ctx), {}, false);
@@ -657,14 +641,6 @@ bool DataFlowSanitizer::doInitialization(Module &M) {
         PointerType::getUnqual(
             FunctionType::get(PointerType::getUnqual(ShadowTy), false)));
   }
-  /*
-  if (GetVarArgTLSPtr) {
-    VarArgTLS = nullptr;
-    GetVarArgTLS = ConstantExpr::getIntToPtr(
-        ConstantInt::get(IntptrTy, uintptr_t(GetVarArgTLSPtr)),
-        PointerType::getUnqual(
-            FunctionType::get(PointerType::getUnqual(Type::getInt32Ty(*Ctx)), false)));
-  }*/
 
   ColdCallWeights = MDBuilder(*Ctx).createBranchWeights(1, 1000);
   return true;
@@ -747,36 +723,6 @@ DataFlowSanitizer::buildWrapperFunction(Function *F, StringRef NewFName,
   return NewF;
 }
 
-char* DataFlowSanitizer::getFileNameOfFunc(Function* func){
-      if(func == NULL){
-          return "";
-      }
-      MDNode* funcMD = func->getMetadata("dbg");
-      if(funcMD){
-          DISubprogram* subProgram = dyn_cast<DISubprogram>(funcMD);
-          Metadata* scope = subProgram->getRawScope();
-          DIScope* diScope = dyn_cast<DIScope>(scope);
-          return (char *)(diScope->getFilename().data());
-      }
-      else{
-          return "";
-      }
-}
-
-char* DataFlowSanitizer::getFileNameOfInst(Instruction* instr){
-      char* ret = "";
-      const DebugLoc &location = instr->getDebugLoc();
-     if (!location)
-        return "";
-      auto *Scope = cast<DIScope>(location->getScope());
-      if(Scope == NULL)
-        return "";
-      //if(Scope->getFilename() == NULL)
-       // return "";
-      ret = (char *)(Scope->getFilename().data());
-      return ret;
-}
-
 Constant *DataFlowSanitizer::getOrBuildTrampolineFunction(FunctionType *FT,
     StringRef FName) {
   FunctionType *FTT = getTrampolineFunctionType(FT);
@@ -825,12 +771,6 @@ bool DataFlowSanitizer::runOnModule(Module &M) {
     if (GlobalVariable *G = dyn_cast<GlobalVariable>(RetvalTLS))
       G->setThreadLocalMode(GlobalVariable::InitialExecTLSModel);
   }
-/*
-  if (!GetVarArgTLSPtr) {
-    VarArgTLS = Mod->getOrInsertGlobal("__dfsan_vararg_tls", Type::getInt32Ty(*Ctx));
-    if (GlobalVariable *G = dyn_cast<GlobalVariable>(VarArgTLS))
-      G->setThreadLocalMode(GlobalVariable::InitialExecTLSModel);
-  }*/
 
   ExternalShadowMask =
       Mod->getOrInsertGlobal(kDFSanExternShadowPtrMask, IntptrTy);
@@ -1073,16 +1013,8 @@ bool DataFlowSanitizer::runOnModule(Module &M) {
     IRBuilder<> IRB(InsertPoint);
     Value * FuncName = IRB.CreateGlobalStringPtr(i->getName());
     Value * FrameIndex = IRB.CreateAlloca(IntegerType::getInt64Ty(*Ctx));
-    char* file_name = getFileNameOfFunc(i);
-    //puts(file_name);
-    Value * FileName = IRB.CreateGlobalStringPtr(file_name);
-    
-    Value* args[2] = {};
-    args[0] = FuncName;
-    args[1] = FileName;
-
     auto store_inst = IRB.CreateStore(
-        IRB.CreateCall(DFSanEntryFn, args),
+        IRB.CreateCall(DFSanEntryFn, FuncName),
         FrameIndex);
 
 #ifdef DEBUG_INFO
@@ -1200,17 +1132,6 @@ Value *DFSanFunction::getRetvalTLS() {
   return RetvalTLSPtr = IRB.CreateCall(DFS.GetRetvalTLS, {});
 }
 
-Value *DFSanFunction::getVarArgTLS() {
-  
-  if (VarArgTLSPtr)
-    return VarArgTLSPtr;
-  if (DFS.VarArgTLS)
-    return VarArgTLSPtr = DFS.VarArgTLS;
-
-  IRBuilder<> IRB(&F->getEntryBlock().front());
-  return VarArgTLSPtr = IRB.CreateCall(DFS.GetVarArgTLS, {});
-}
-
 Value *DFSanFunction::getArgTLS(unsigned Idx, Instruction *Pos) {
   IRBuilder<> IRB(Pos);
   return IRB.CreateConstGEP2_64(getArgTLSPtr(), 0, Idx);
@@ -1324,10 +1245,8 @@ Value *DFSanFunction::combineShadows(Value *V1, Value *V2, Instruction *Pos) {
     CCS.Block = Pos->getParent();
     CCS.Shadow = Call;
   } else {
-    /**/
     BasicBlock *Head = Pos->getParent();
-    //Value *Ne = IRB.CreateICmpNE(V1, V2);
-    Value *Ne = IRB.CreateICmpNE(IRB.getInt32(0), IRB.getInt32(1));
+    Value *Ne = IRB.CreateICmpNE(V1, V2);
     BranchInst *BI = cast<BranchInst>(SplitBlockAndInsertIfThen(
         Ne, Pos, /*Unreachable=*/false, DFS.ColdCallWeights, &DT));
     IRBuilder<> ThenIRB(BI);
@@ -1369,6 +1288,7 @@ void DFSanVisitor::handleSpecialFunctions(Instruction * InsertPoint, Value * Sha
 
 
 bool PRINT_NAME = false;
+bool LOG_INFO = false;
 
 void DFSanVisitor::logTaintedOps(Instruction * InsertPoint, Value * Shadow) {
   int line = 0;
@@ -1382,27 +1302,25 @@ void DFSanVisitor::logTaintedOps(Instruction * InsertPoint, Value * Shadow) {
   }
   if(LOG_INFO)
   {
-    printf("\n%d %d: ", line, col);
-    printf("label = %" PRIu16 "\n", Shadow);
-    InsertPoint->print(errs());
+  printf("\n%d %d: ", line, col);
+  printf("label = %" PRIu16 "\n", Shadow);
+  InsertPoint->print(errs());
   }
   if(Shadow == DFSF.DFS.ZeroShadow)
     return;
   IRBuilder<> IRB(InsertPoint);
-  Value* args[4] = {};
-  Function *f = InsertPoint->getParent()->getParent();
-  
-  args[0] = IRB.getInt32(line);
-  args[1] = IRB.getInt32(col);
-
-
-  char* file_name = DFSF.DFS.getFileNameOfInst(InsertPoint);
-  Value * FileName = IRB.CreateGlobalStringPtr(file_name);
-  
-
-    
+  Value* args[3] = {};
+  if(PRINT_NAME) 
+  {
+    args[0] = IRB.CreateGlobalStringPtr(StringRef(InsertPoint->getOpcodeName()));
+    args[1] = IRB.CreateGlobalStringPtr(StringRef(InsertPoint->getOpcodeName()));
+  }
+  else
+  {
+    args[0] = IRB.getInt32(line);
+    args[1] = IRB.getInt32(col);
+  }
   args[2] = Shadow;
-  args[3] = FileName;
   CallInst *Call = IRB.CreateCall(DFSF.DFS.DFSanLogTaintFn, args);
   Call->addAttribute(AttributeList::ReturnIndex, Attribute::ZExt);
   Call->addParamAttr(0, Attribute::ZExt);
@@ -1680,24 +1598,24 @@ void DFSanVisitor::visitCmpInst(CmpInst &CI) {
   }
   if(LOG_INFO)
   {
-    printf("\n%d %d: ", line, col);
-    printf("label = %" PRIu16 "\n", CombinedShadow);
-    CI.print(errs());
+  printf("\n%d %d: ", line, col);
+  printf("label = %" PRIu16 "\n", CombinedShadow);
+  CI.print(errs());
   }
   if(CombinedShadow == DFSF.DFS.ZeroShadow)
     return;
-  Value* args[4] = {};
-  
-  args[0] = IRB.getInt32(line);
-  args[1] = IRB.getInt32(col);
-    
+  Value* args[3] = {};
+  if(PRINT_NAME) 
+  {
+    args[0] = IRB.CreateGlobalStringPtr(StringRef(CI.getOpcodeName()));
+    args[1] = IRB.CreateGlobalStringPtr(StringRef(CI.getOpcodeName()));
+  }
+  else
+  {
+    args[0] = IRB.getInt32(line);
+    args[1] = IRB.getInt32(col);
+  }
   args[2] = CombinedShadow;
-
-  Function *f = CI.getParent()->getParent();
-  char* file_name = DFSF.DFS.getFileNameOfFunc(f);
-  Value * FileName = IRB.CreateGlobalStringPtr(file_name);
-  args[3] = FileName;
-
   CallInst *Call = IRB.CreateCall(DFSF.DFS.DFSanLogCmpFn, args);
 
   Call->addAttribute(AttributeList::ReturnIndex, Attribute::ZExt);
@@ -1984,11 +1902,8 @@ void DFSanVisitor::visitCallSite(CallSite CS) {
   FunctionType *FT = cast<FunctionType>(
       CS.getCalledValue()->getType()->getPointerElementType());
   if (DFSF.DFS.getInstrumentedABI() == DataFlowSanitizer::IA_TLS) {
-      if(LOG_INFO)
-      {
-          printf("\nparam: %d\n", FT->getNumParams());
-          CS->print(errs());
-      }
+      printf("\nparam: %d\n", FT->getNumParams());
+      CS->print(errs());
       for (unsigned i = 0, n = FT->getNumParams(); i != n; ++i) {
         
         IRB.CreateStore(DFSF.getShadow(CS.getArgument(i)),
@@ -1997,24 +1912,12 @@ void DFSanVisitor::visitCallSite(CallSite CS) {
       if(FT->isVarArg())
       {
         unsigned VarArgSize = CS.arg_size() - FT->getNumParams();
-        
-        //GlobalVariable *gVarArg = new GlobalVariable(*CS->getModule(), Type::getInt32Ty(*DFSF.DFS.Ctx), false, GlobalValue::ExternalLinkage, 0,
-        //                   "__dfsan_vararg_tls");
-        //gVarArg->setThreadLocalMode(GlobalVariable::InitialExecTLSModel);
-        //GlobalVariable *G0 = M->getGlobalVariable("__dfsan_vararg_tls");
-        IRB.CreateStore(IRB.getInt32(50),
-              DFSF.getArgTLS(63, CS.getInstruction()));
-        //IRB.CreateStore(IRB.getInt32(50), gVarArg);
-
-
-
-        if(LOG_INFO)
-          printf("\nvar_args %d\n", VarArgSize);
+        printf("\nvar_args %d\n", VarArgSize);
         
         for (unsigned i = FT->getNumParams(), n = FT->getNumParams() + VarArgSize; i != n; ++i) {
           
           IRB.CreateStore(DFSF.getShadow(CS.getArgument(i)),
-              DFSF.getArgTLS(i-FT->getNumParams()+50, CS.getInstruction()));
+              DFSF.getArgTLS(i, CS.getInstruction()));
         }
       }
   }

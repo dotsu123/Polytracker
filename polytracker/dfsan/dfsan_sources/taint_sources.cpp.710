@@ -199,9 +199,6 @@ __dfsw_pread64(int fd, void *buf, size_t count, off_t offset,
 	return ret;
 }
 
-dfsan_label lst_fread_label = 0;
-
-
 EXT_C_FUNC size_t
 __dfsw_fread(void *buff, size_t size, size_t count, FILE *fd,
 		dfsan_label buf_label, dfsan_label size_label,
@@ -214,8 +211,6 @@ __dfsw_fread(void *buff, size_t size, size_t count, FILE *fd,
 	fflush(stderr);
 #endif
  	if (taint_info_manager->isTracking(fd)) {
-		// in case of ferror 
-		lst_fread_label = dfsan_union(size_label, count_label);
 		if (ret > 0) {
 			//fread returns number of objects read specified by size
 		 	taint_info_manager->taintData(fd, (char*)buff, offset, ret * size); 	
@@ -305,21 +300,6 @@ __dfsw_getchar(dfsan_label *ret_label) {
 		*ret_label = dfsan_create_label(offset, taint_info_manager->getTaintId(stdin));
 	}
 	return c;
-}
-
-EXT_C_FUNC int
-__dfsw_ferror(FILE *fd, dfsan_label fd_label,
-		dfsan_label *ret_label) {
-	int ret = ferror(fd);
-#ifdef DEBUG_INFO
-	fprintf(stderr, "ferror %p,  %d \n", fd, ret);
-#endif
-	if (ret && taint_info_manager->isTracking(fd)) {
-		*ret_label = lst_fread_label;
-	} else {
-		*ret_label = 0;
-	}
-	return ret;
 }
 
 EXT_C_FUNC char *
@@ -423,10 +403,3 @@ __dfsw_malloc(size_t size, dfsan_label size_label, dfsan_label *ret_label) {
 
   return ptr;
 }
-/*
-typedef struct _valist {
- int gp_offset;
- int fd_offset;
- int* overflow_arg_area;
- int* reg_save_area;
-} _valist_t;*/

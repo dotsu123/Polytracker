@@ -58,10 +58,6 @@ static atomic_dfsan_label __dfsan_last_label;
 Flags __dfsan::flags_data;
 SANITIZER_INTERFACE_ATTRIBUTE THREADLOCAL dfsan_label __dfsan_retval_tls;
 SANITIZER_INTERFACE_ATTRIBUTE THREADLOCAL dfsan_label __dfsan_arg_tls[64];
-//SANITIZER_INTERFACE_ATTRIBUTE THREADLOCAL int __dfsan_vararg_tls;
-SANITIZER_INTERFACE_ATTRIBUTE int __dfsan_replace_taint_label = 0;
-SANITIZER_INTERFACE_ATTRIBUTE dfsan_label __dfsan_vararg_label;
-
 SANITIZER_INTERFACE_ATTRIBUTE uptr __dfsan_shadow_ptr_mask;
 
 //This is a boundry we use when setting up the address space
@@ -133,49 +129,27 @@ void __dfsan_reset_frame(int* index) {
 }
 
 extern "C" SANITIZER_INTERFACE_ATTRIBUTE
-int __dfsan_func_entry(char * fname, char* file_name) {
+int __dfsan_func_entry(char * fname) {
 	init_lock.lock(); 
 	if (is_init == false) {
 		dfsan_late_init();
 		is_init = true; 	
 	}
 	init_lock.unlock(); 
-	return taint_log_manager->logFunctionEntry(fname, file_name);
+	return taint_log_manager->logFunctionEntry(fname);
 }
 
 extern "C" SANITIZER_INTERFACE_ATTRIBUTE
-void __dfsan_log_taint_cmp(int line, int col, dfsan_label some_label, char* file_name) {
-	taint_log_manager->logCompare(some_label, line, col, file_name); 
+void __dfsan_log_taint_cmp(int line, int col, dfsan_label some_label) {
+	taint_log_manager->logCompare(some_label, line, col); 
 	if(log_verbose)
 		printf("Tainted variable cmp: line: %d, col: %d\n", line, col);
-}
-// Resolves the union of two unequal labels.  Nonequality is a precondition for
-// this function (the instrumentation pass inlines the equality test).
-// The union table prevents there from being dupilcate labels
-extern "C" SANITIZER_INTERFACE_ATTRIBUTE
-dfsan_label __dfsan_union(dfsan_label l1, dfsan_label l2) {
-	dfsan_label ret = l1;
-	if(__dfsan_replace_taint_label == 1){
-		if(log_verbose)
-			printf("\n__dfsan_union final: %d\n", __dfsan_arg_tls[63]);
-		ret = taint_prop_manager->unionLabels(ret, __dfsan_vararg_label);
-		__dfsan_replace_taint_label = 0;
-	}
-	else if(__dfsan_replace_taint_label > 1)
-	{
-		if(log_verbose)
-			printf("\n__dfsan_union: %d\n", __dfsan_replace_taint_label);
-		__dfsan_replace_taint_label--;
-	}
-	if(ret == l2)
-		return l1;
-	return taint_prop_manager->unionLabels(ret, l2);
 }
 
 extern "C" SANITIZER_INTERFACE_ATTRIBUTE
 //void __dfsan_log_taint(dfsan_label some_label) {
-void __dfsan_log_taint(int line, int col, dfsan_label some_label, char* file_name) {
-	taint_log_manager->logOperation(some_label, line, col, file_name); 
+void __dfsan_log_taint(int line, int col, dfsan_label some_label) {
+	taint_log_manager->logOperation(some_label, line, col); 
 	//puts(inst);
 	if(log_verbose)
 		printf("Tainted variable: line: %d, col: %d\n", line, col);
@@ -187,15 +161,12 @@ void __dfsan_func_exit() {
 	taint_log_manager->logFunctionExit(); 
 }
 
-
-
+// Resolves the union of two unequal labels.  Nonequality is a precondition for
+// this function (the instrumentation pass inlines the equality test).
+// The union table prevents there from being dupilcate labels
 extern "C" SANITIZER_INTERFACE_ATTRIBUTE
-void __va_arg_taint() {
-	if(log_verbose)
-		printf("\nvararg: %d\n", __dfsan_arg_tls[63]);
-	__dfsan_vararg_label = __dfsan_arg_tls[__dfsan_arg_tls[63]++];
-	__dfsan_replace_taint_label = 4;
-	return;
+dfsan_label __dfsan_union(dfsan_label l1, dfsan_label l2) {
+	return taint_prop_manager->unionLabels(l1, l2);
 }
 
 extern "C" SANITIZER_INTERFACE_ATTRIBUTE

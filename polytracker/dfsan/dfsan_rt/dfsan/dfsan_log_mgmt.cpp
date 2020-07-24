@@ -11,6 +11,9 @@
 
 using namespace __dfsan; 
 
+char* cur_func;
+char* cur_file;
+
 //MAPPING MANAGER
 taintMappingManager::taintMappingManager(char * shad_mem_ptr, char * forest_ptr) {
 	shad_mem = shad_mem_ptr; 
@@ -50,41 +53,27 @@ taintLogManager::~taintLogManager() {}
 bool LOG_ALL_LABELS = true;
 bool log_verbose = false;
 void 
-taintLogManager::logCompare(dfsan_label some_label, int line, int col) {
+taintLogManager::logCompare(dfsan_label some_label, int line, int col, char* file_name) {
 	if (some_label == 0) {return;}
 	taint_log_lock.lock();
 	taint_node_t * curr_node = map_manager->getTaintNode(some_label); 
-
-
 
 	if(line == 0 && col == 0){
 		if(log_verbose)
 		{
 			printf("extra taint cmp label %d level %d\n", some_label, curr_node->level);
-			
 		}
 	}
 	else
 	{
-		printf("taint_source cmp line: %d col: %d label %d level %d\n", line, col, some_label, curr_node->level);
+		printf("taint_source cmp line: %d col: %d file: %s label %d level %d\n", line, col, file_name, some_label, curr_node->level);
 		if(LOG_ALL_LABELS) // && new_node->level > 1)
 		{
-
 			Roaring ret = iterativeDFS(curr_node);
-
 			
 			for (auto it = ret.begin(); it != ret.end(); it++) {
 				printf("%d\n", *it);
 			}
-
-
-			//Split up roaring based on origin bytes, and then into sets which we can make jsons 
-			/*
-			std::unordered_map<std::string, std::set<dfsan_label>> source_set_map  = utilityPartitionSet(ret);
-			for (auto map_it = source_set_map.begin(); map_it != source_set_map.end(); map_it++) {
-				json byte_set(map_it->second); 
-				byte_set.dump();
-			}*/
 		}
 	}
 
@@ -98,8 +87,9 @@ taintLogManager::logCompare(dfsan_label some_label, int line, int col) {
 	(function_to_bytes)[func_stack[func_stack.size()-1]].insert(curr_node);	      
 	taint_log_lock.unlock(); 
 }
+
 void 
-taintLogManager::logOperation(dfsan_label some_label, int line, int col) {
+taintLogManager::logOperation(dfsan_label some_label, int line, int col, char* file_name) {
 	if (some_label == 0) {return;}
 	taint_log_lock.lock();
 	taint_node_t * new_node = map_manager->getTaintNode(some_label);
@@ -108,30 +98,18 @@ taintLogManager::logOperation(dfsan_label some_label, int line, int col) {
 		if(log_verbose)
 		{
 			printf("extra taint label %d level %d\n", some_label, new_node->level++);
-			
 		}
 	}
 	else
 	{
-		printf("taint_source line: %d col: %d label %d level %d\n", line, col, some_label, new_node->level++);
+		printf("taint_source line: %d col: %d file: %s label %d level %d\n", line, col, file_name, some_label, new_node->level++);
 		if(LOG_ALL_LABELS) // && new_node->level > 1)
 		{
-
 			Roaring ret = iterativeDFS(new_node);
 
-			
 			for (auto it = ret.begin(); it != ret.end(); it++) {
 				printf("%d\n", *it);
 			}
-
-
-			//Split up roaring based on origin bytes, and then into sets which we can make jsons 
-			/*
-			std::unordered_map<std::string, std::set<dfsan_label>> source_set_map  = utilityPartitionSet(ret);
-			for (auto map_it = source_set_map.begin(); map_it != source_set_map.end(); map_it++) {
-				json byte_set(map_it->second); 
-				byte_set.dump();
-			}*/
 		}
 	}
 
@@ -144,9 +122,9 @@ taintLogManager::logOperation(dfsan_label some_label, int line, int col) {
 }
 
 int
-taintLogManager::logFunctionEntry(char * fname) {
+taintLogManager::logFunctionEntry(char * fname, char* file_name) {
 	taint_log_lock.lock();
-	printf("=========== enter function %s\n", fname);
+	printf("=========== enter function %s,%s\n", fname, file_name);
 	std::string func_name = std::string(fname); 
 	std::string new_str = std::string(fname);
 	std::thread::id this_id = std::this_thread::get_id();
